@@ -80,7 +80,7 @@ class NodeUpdate(nn.Module):
 
     def forward(self, x, edge_index, edge_attr, u, batch):
         """
-        Computes forward pass of the NodeUpdate module.
+        Computes forward pass of NodeUpdate module.
 
         Args:
             x (torch.Tensor): Node features.
@@ -126,10 +126,10 @@ class GNN(nn.Module):
         super(GNN, self).__init__()
         self.input_layer = MetaLayer(
             EdgeUpdate(nc=nc, ec=ec, hc=hc, ic=ic), 
-            NodeUpdate(nc=nc, ec=ec, hc=hc, ic=ic, oc=4))
-        self.output_layer = MetaLayer(
-            EdgeUpdate(nc=4, ec=2*nc + ec + ic, hc=hc, ic=ic), 
-            NodeUpdate(nc=4, ec=2*nc + ec + ic, hc=hc, ic=ic, oc=oc))
+            NodeUpdate(nc=nc, ec=ec, hc=hc, ic=ic, oc=oc))
+        # self.output_layer = MetaLayer(
+        #     EdgeUpdate(nc=4, ec=2*nc + ec + ic, hc=hc, ic=ic), 
+        #     NodeUpdate(nc=4, ec=2*nc + ec + ic, hc=hc, ic=ic, oc=oc))
 
     def forward(self, x, edge_index, edge_attr):
         """
@@ -144,7 +144,7 @@ class GNN(nn.Module):
             torch.Tensor: Updated node features.
         """
         x, edge_attr, _ = self.input_layer(x, edge_index, edge_attr)
-        x, _, _ = self.output_layer(x, edge_index, edge_attr)
+        # x, _, _ = self.output_layer(x, edge_index, edge_attr)
         return x, _, _
 
 
@@ -159,7 +159,7 @@ def train(model, train, val, optimizer, criterion, device, epochs, track=False):
         optimizer (torch.optim.Optimizer): The optimizer used for training.
         criterion (torch.nn.Module): The loss function used for training.
         device (torch.device): The device to be used for training.
-        epochs (int): The number of training epochs.
+        epochs (int): Number of training epochs.
         track (bool, optional): If true, logs training to wandb.
     """
     print(f'Training on {device}...')
@@ -203,51 +203,70 @@ def train(model, train, val, optimizer, criterion, device, epochs, track=False):
     torch.save(model.state_dict(), 'trained_model.pt')
 
 
+def newDataset(train_size, val_size, test_size):
+    """
+    Creates new train, validation, and test datasets.
+
+    Parameters:
+        train_size (int): Number of training samples.
+        val_size (int): Number of validation samples.
+        test_size (int): Number of test samples.
+
+    Returns:
+        None
+    """
+    squares.createData(train_size, 'train_data.pkl')
+    squares.createData(val_size, 'val_data.pkl')
+    squares.createData(test_size, 'test_data.pkl', raw=True)
+
 if __name__ == '__main__':
     # define meta parameters
     train_size = 1000
     val_size = 100
     test_size = 100
-    epochs = 350
+    epochs = 100
     track = False
 
     # create model
     model = GNN(
         nc=1, # node channels
         ec=2, # edge channels
-        hc=16, # hidden channels
-        ic=4, # intermediate channels
+        hc=32, # hidden channels
+        ic=16, # intermediate channels
         oc=2 # output channels
         ).to(device)
-    # model.load_state_dict(torch.load('trained_model.pt'))
+    model.load_state_dict(torch.load('trained_model.pt'))
 
-    # load data
-    with open('train_data.pkl', 'rb') as f:
-        train_data = pickle.load(f)
-    with open('val_data.pkl', 'rb') as f:
-        val_data = pickle.load(f)
-    train_loader = DataLoader(train_data, batch_size=32, shuffle=True)
-    val_loader = DataLoader(val_data, batch_size=32, shuffle=False)
+    # # create new dataset if needed
+    # newDataset(train_size, val_size, test_size)
 
-    # define loss and optimizer
-    criterion = nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    # # load data
+    # with open('train_data.pkl', 'rb') as f:
+    #     train_data = pickle.load(f)
+    # with open('val_data.pkl', 'rb') as f:
+    #     val_data = pickle.load(f)
+    # train_loader = DataLoader(train_data, batch_size=32, shuffle=True)
+    # val_loader = DataLoader(val_data, batch_size=32, shuffle=False)
 
-    # train the model
-    train(model, 
-          train_loader, 
-          val_loader,
-          optimizer, 
-          criterion, 
-          device, 
-          epochs, 
-          track)
+    # # define loss and optimizer
+    # criterion = nn.MSELoss()
+    # optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+    # # train the model
+    # train(model, 
+    #       train_loader, 
+    #       val_loader,
+    #       optimizer, 
+    #       criterion, 
+    #       device, 
+    #       epochs, 
+    #       track)
     
     # test the model
     with open('test_data.pkl', 'rb') as f:
         test_data = pickle.load(f)
     # select on of the test meshes to visualize
-    mesh = test_data[1]
+    mesh = test_data[11]
     model.eval()
     with torch.no_grad():
         data = mesh.mesh2Graph().to(device)

@@ -88,8 +88,11 @@ class Mesh():
             ndarray: Array of graded values.
         """
         r = grade**(1/(cells - 1))
-        dx = length*(1 - r)/(1 - r**cells)
-        return np.array([start + dx*(1 - r**i)/(1 - r) for i in range(cells + 1)])
+        if r == 1:
+            return np.linspace(start, start + length, cells + 1)
+        else:
+            dx = length*(1 - r)/(1 - r**cells)
+            return np.array([start + dx*(1 - r**i)/(1 - r) for i in range(cells + 1)])
     
     def buildMesh(self):
         """
@@ -104,7 +107,7 @@ class Mesh():
         X, Y = np.meshgrid(x, y)
         return X, Y
     
-    def plotMesh(self, field=None, output_path=None):
+    def plotMesh(self, field=None, output_path=None, vmin=None, vmax=None):
         """
         Plots the mesh defined by the X and Y grids. Optionally, plots the fields.
 
@@ -115,9 +118,11 @@ class Mesh():
         fig, ax = plt.subplots()
         ax.plot(X, Y, 'k')
         ax.plot(X.T, Y.T, 'k')
+        ax.set_title(f'Cells: {self.nx} x {self.ny}, '
+                     f'Grading: {self.gx:.3f} x {self.gy:.3f}')
         if field is not None:
-            contour = plt.contourf(X, Y, field, 100, cmap='plasma')
-            fig.colorbar(contour, ax=ax)
+            contour = plt.contourf(X, Y, field, 100, cmap='plasma', vmin=vmin, vmax=vmax)
+            cb = fig.colorbar(contour, ax=ax)
         ax.set_xticks([X[0, 0], X[0, -1]])
         ax.set_yticks([Y[0, 0], Y[-1, 0]])
         ax.spines['left'].set_visible(False)
@@ -130,6 +135,7 @@ class Mesh():
             fig.savefig(output_path, dpi=250)
         else:
             fig.savefig('mesh.png', dpi=250)
+        return cb.vmin, cb.vmax
 
     def mesh2Graph(self):
         """
@@ -145,8 +151,14 @@ class Mesh():
         Nv = self.F.size  # number of nodes
         Ne = (self.nx + 1)*self.ny + (self.ny + 1)*self.nx  # number of edges
 
+        # these next few lines create a mask to exclude boundary nodes
+        idxs = np.arange(Nv).reshape(self.ny + 1, self.nx + 1) # array of node indices
+        boundaries = np.concatenate((idxs[0, :], idxs[-1, :], idxs[:, 0], idxs[:, -1])) # list of boundary indices
+        mask = np.isin(idxs.flatten(), np.unique(boundaries)) # 1 for boundary nodes, 0 for interior nodes
+
         node_attr = self.F.reshape(Nv, 1) # node features, shape (Nv, nv)
         y = np.concatenate((self.Fx.reshape(Nv, 1), self.Fy.reshape(Nv, 1)), axis=1)
+        bcs = y[mask] # boundary conditions
 
         edge_index = np.zeros((2, Ne), dtype=int) # edge indices, shape (2, Ne)
         edge_attr = np.zeros((Ne, 2)) # edge features, shape (Ne, ne)
@@ -192,8 +204,10 @@ class Mesh():
         edge_index = torch.tensor(edge_index, dtype=torch.long)
         edge_attr = torch.tensor(edge_attr, dtype=torch.float32)
         y = torch.tensor(y, dtype=torch.float32)
+        mask = torch.tensor(mask, dtype=torch.bool)
+        bcs = torch.tensor(bcs, dtype=torch.float32)
         # return graph in PyG format
-        return Data(x, edge_index, edge_attr, y)
+        return Data(x, edge_index, edge_attr, y, mask=mask, bcs=bcs)
 
     def getFields(self):
         """
@@ -206,7 +220,8 @@ class Mesh():
         """
         # generate random functions
         x, y = sp.symbols('x y')
-        basis = [1, sp.sin(x), sp.sin(y), sp.sin(x)*sp.sin(y), x, y, x*y]
+        # basis = [1, sp.sin(x), sp.sin(y), sp.sin(x)*sp.sin(y), x, y, x*y]
+        basis = [x, y, sp.sin(x), sp.sin(y), sp.sin(x)*sp.sin(y), x*y]
         coeffs = np.random.uniform(-1, 1, len(basis))
         func = sum([coeff*b for coeff, b in zip(coeffs, basis)])
 
@@ -239,9 +254,9 @@ def createData(num_samples, output_path=None, raw=False):
     print('Generating data...')
     for _ in tqdm(range(num_samples)):
         x0, y0 = rng.uniform(-10, 10, size=2)
-        nx, ny = rng.integers(10, 100, size=2)
-        gx, gy = rng.uniform(.1, 10, size=2)
-        lx, ly = rng.uniform(1, 10, size=2)
+        nx, ny = rng.integers(50, 100, size=2)
+        gx, gy = rng.uniform(.2, 5, size=2)
+        lx, ly = rng.uniform(1, 5, size=2)
         mesh = Mesh(x0, y0, nx, ny, gx, gy, lx, ly)
         if raw:
             data.append(mesh)
@@ -288,10 +303,10 @@ def main():
     mesh.plotMesh(field=mesh.F)
     print(mesh)
     graph = mesh.mesh2Graph()
-    print(graph.x.numpy())
-    print(np.hstack((graph.edge_index.numpy().T, graph.edge_attr.numpy())))
-    print(mesh.X)
-    print(np.flip(mesh.Y))
+    # print(graph.x.numpy())
+    # print(np.hstack((graph.edge_index.numpy().T, graph.edge_attr.numpy())))
+    # print(mesh.X)
+    # print(np.flip(mesh.Y))
 
 
 if __name__ == '__main__':

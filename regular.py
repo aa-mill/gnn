@@ -4,10 +4,179 @@ import matplotlib.pyplot as plt
 import argparse
 import torch
 from torch_geometric.data import Data
-from torch_geometric.utils import to_undirected
 from tqdm import tqdm
 import pickle
+from torch_scatter import scatter
 
+
+class Line():
+    """
+    Object for generating and visualizing graded line meshes.
+
+    Args:
+        x0 (float): Lower boundary of domain.
+        n (int): Number of cells.
+        g (float): Grading factor.
+        l (float): Length of domain.
+
+    Attributes:
+        x0 (float): Lower boundary of domain.
+        n (int): Number of cells.
+        g (float): Grading factor.
+        l (float): Length of domain.
+        X (list): Grid points.
+        F (list): Field values at grid points.
+        Fx (list): Derivative at grid points.
+
+    Methods:
+        __init__(): Initializes the Line object.
+        gradedValues(): Generates an array of graded values.
+        plotLine(): Plots the line mesh.
+        line2Graph(): Converts the line to a graph representation.
+        getFields(): Generates random field F and its derivative.
+    """
+    def __init__(self, x0, n, g, l):
+        self.x0 = x0 # starting x coordinate
+        self.n = n # number of cells
+        self.g = g # grading
+        self.l = l # domain length
+        self.X = self.gradedValues(x0, l, g, n)
+        self.F, self.Fx = self.getFields()
+
+    def gradedValues(self, start, length, grade, cells):
+        """
+        Generates an array of graded values.
+
+        Args:
+            start (float): Lower boundary of domain.
+            length (float): Length of domain.
+            grade (float): Ratio of last cell length to first cell length.
+            cells (int): Number of cells along dimension.
+
+        Returns:
+            ndarray: Array of graded values.
+        """
+        r = grade**(1/(cells - 1))
+        if r == 1:
+            return np.linspace(start, start + length, cells + 1)
+        else:
+            dx = length*(1 - r)/(1 - r**cells)
+            return np.array([start + dx*(1 - r**i)/(1 - r) for i in range(cells + 1)])
+        
+    def plotLine(self, field=None, output_path=None):
+        """
+        Plots true derivative and discretization. Optionally plots predicted derivative
+        for comparison.
+
+        Args:
+            field (dict): Dictionary containing data, color, ls, and label for predicted field.
+            output_path (str): Path to save plot.
+
+        Returns:
+            None
+        """
+        fig, ax = plt.subplots()
+        ax.plot(self.X, self.Fx, 'k.', label='Truth')
+        if field is not None:
+            data = field.get('data')
+            color = field.get('color', 'b')
+            ls = field.get('ls', '-')
+            label = field.get('label', '')
+            ax.plot(self.X, data, color, ls=ls, label=label)
+        ax.set_title(f'Cells: {self.n}, Grading: {self.g:.3f}')
+        labels = [f'{self.X[0]:.3f}'] \
+            + ['' for _ in range(self.n - 1)] \
+                + [f'{self.X[-1]:.3f}']
+        ax.set_xlabel(r'$x$')
+        ax.set_ylabel(r'$f_x$')
+        ax.set_xticks(self.X)
+        ax.set_xticklabels(labels)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.legend()
+        fig.tight_layout()
+        if output_path:
+            fig.savefig(output_path, dpi=250)
+        else:
+            fig.savefig('line.png', dpi=250)
+        
+    def line2Graph(self, nps=1):
+        """
+        Converts line to graph representation.
+
+        Returns:
+            node_attr (ndarray): Node attributes, shape (Nv, nv), where Nv = number of nodes
+                and nv = number of attributes per node.
+            edge_index (ndarray): Edge indices, shape (2, Ne), where Ne = number of edges
+                and ne = number of attributes per edge.
+            edge_attr (ndarray): Edge attributes, shape (Ne, ne).
+        """
+        Nv = self.X.size # number of nodes
+        Ne = sum(Nv - i for i in range(1, nps + 1)) # number of edges
+
+        node_attr = self.F.reshape(Nv, 1) # node features, shape (Nv, nv)
+        # set boundary conditions, in this case at the endpoints
+        mask = np.concatenate(([True], np.zeros(Nv - 2, dtype=bool), [True]))
+        y = self.Fx.reshape(Nv, 1)
+        bcs = y[mask]
+
+        edge_index = np.zeros((2, Ne), dtype=int) # edge indices, shape (2, Ne)
+        edge_attr = np.zeros((Ne, 2)) # edge features, shape (Ne, ne)
+        edge_idx = 0
+
+        # loop over neighborhood size
+        for i in range(1, nps + 1):
+            # loop over nodes
+            for j in range(Nv - i):
+                edge_index[:, edge_idx] = [j, j + i] # add edge indices
+                # first attribute is distance, second is neighbor index distance
+                edge_attr[edge_idx, :] = [self.X[j] - self.X[j + i], -i]
+                edge_idx += 1
+            
+        # add mirrored edges
+        edge_index = np.concatenate((edge_index, np.flip(edge_index, axis=0)), axis=1)
+        edge_attr = np.concatenate((edge_attr, -edge_attr), axis=0)
+
+        # compute node degrees
+        degrees = np.zeros(Nv, dtype=int)
+        np.add.at(degrees, edge_index[1, :], 1)
+        node_attr = np.concatenate((node_attr, degrees.reshape(-1, 1)), axis=1)
+
+        # create PyTorch tensors
+        x = torch.tensor(node_attr, dtype=torch.float32)
+        edge_index = torch.tensor(edge_index, dtype=torch.long)
+        edge_attr = torch.tensor(edge_attr, dtype=torch.float32)
+        y = torch.tensor(y, dtype=torch.float32)
+        mask = torch.tensor(mask, dtype=torch.bool)
+        bcs = torch.tensor(bcs, dtype=torch.float32)
+        # return graph in PyG format
+        return Data(x, edge_index, edge_attr, y, mask=mask, bcs=bcs)
+
+    def getFields(self):
+        """
+        Generates random field F and its derivative.
+
+        Returns:
+            F (ndarray): Field evaluated on line.
+            Fx (ndarray): Derivative w.r.t x.
+        """
+        # generate random functions
+        x = sp.symbols('x')
+        basis = [1, x, sp.sin(x), sp.cos(x), sp.sin(x)**2, sp.sin(np.pi*(x + 1))]
+        coeffs = np.random.uniform(-1, 1, len(basis))
+        func = sum([coeff*b for coeff, b in zip(coeffs, basis)])
+        # func = sp.sin(2*np.pi*x)
+
+        # get analytical functions and gradients
+        f = sp.lambdify(x, func, 'numpy')
+        fx = sp.lambdify(x, sp.diff(func, x), 'numpy')
+
+        # compute function and gradients over mesh
+        F = f(self.X)
+        Fx = fx(self.X)
+
+        return F, Fx
+        
 
 class Mesh():
     """
@@ -45,7 +214,7 @@ class Mesh():
         buildMesh(): Builds a mesh grid using graded values of x and y.
         plotMesh(): Plots the mesh defined by the X and Y grids.
         mesh2Graph(): Converts the mesh to a graph representation.
-        getFields(): Generates random fields F and its gradient (Fx, Fy) over mesh.
+        getFields(): Generates random field F and its gradient (Fx, Fy) over mesh.
     """
     def __init__(self, x0, y0, nx, ny, gx, gy, lx, ly):
         self.x0 = x0  # starting x coordinate
@@ -121,7 +290,7 @@ class Mesh():
         ax.set_title(f'Cells: {self.nx} x {self.ny}, '
                      f'Grading: {self.gx:.3f} x {self.gy:.3f}')
         if field is not None:
-            contour = plt.contourf(X, Y, field, 100, cmap='plasma', vmin=vmin, vmax=vmax)
+            contour = ax.contourf(X, Y, field, 100, cmap='plasma', vmin=vmin, vmax=vmax)
             cb = fig.colorbar(contour, ax=ax)
         ax.set_xticks([X[0, 0], X[0, -1]])
         ax.set_yticks([Y[0, 0], Y[-1, 0]])
@@ -139,7 +308,7 @@ class Mesh():
 
     def mesh2Graph(self):
         """
-        Converts the mesh to a graph representation.
+        Converts mesh to graph representation.
 
         Returns:
             node_attr (ndarray): Node attributes, shape (Nv, nv), where Nv = number of nodes
@@ -238,7 +407,7 @@ class Mesh():
         return F, Fx, Fy
 
 
-def createData(num_samples, output_path=None, raw=False):
+def createData(num_samples, dim=2, output_path=None, raw=False, nps=None):
     """
     Creates a dataset of size num_samples, where each sample is a Data object.
 
@@ -249,26 +418,45 @@ def createData(num_samples, output_path=None, raw=False):
     Returns:
         data (list): A list of Data objects, each representing a mesh.
     """
+    if dim not in [1, 2]:
+        raise ValueError('Dimension must be 1 or 2.')
+    elif dim == 1 and nps is None:
+        raise ValueError('Number of neighbors must be specified for 1D data.')
+    elif dim == 2 and nps is not None:
+        raise ValueError('Number of neighbors is only for 1D data.')
+    
     rng = np.random.default_rng()
     data = []
     print('Generating data...')
-    for _ in tqdm(range(num_samples)):
-        x0, y0 = rng.uniform(-10, 10, size=2)
-        nx, ny = rng.integers(50, 100, size=2)
-        gx, gy = rng.uniform(.2, 5, size=2)
-        lx, ly = rng.uniform(1, 5, size=2)
-        mesh = Mesh(x0, y0, nx, ny, gx, gy, lx, ly)
-        if raw:
-            data.append(mesh)
-        else:
-            data.append(mesh.mesh2Graph())
+    if dim == 1:
+        for _ in tqdm(range(num_samples)):
+            x0 = rng.uniform(-10, 10)
+            n = rng.integers(64, 512)
+            g = 1
+            l = rng.uniform(1, 5)
+            line = Line(x0, n, g, l)
+            if raw:
+                data.append(line)
+            else:
+                data.append(line.line2Graph(nps))
+    elif dim == 2:
+        for _ in tqdm(range(num_samples)):
+            x0, y0 = rng.uniform(-10, 10, size=2)
+            nx, ny = rng.integers(50, 100, size=2)
+            gx, gy = rng.uniform(.2, 5, size=2)
+            lx, ly = rng.uniform(1, 5, size=2)
+            mesh = Mesh(x0, y0, nx, ny, gx, gy, lx, ly)
+            if raw:
+                data.append(mesh)
+            else:
+                data.append(mesh.mesh2Graph())
     if output_path:
         with open(output_path, 'wb') as f:
             pickle.dump(data, f)
     else:
         with open('data.pkl', 'wb') as f:
             pickle.dump(data, f)
-    
+
 
 def parse_args():
     """
@@ -277,7 +465,7 @@ def parse_args():
     Returns:
         argparse.Namespace: Parsed command line arguments.
     """
-    parser = argparse.ArgumentParser(description='Generate graded block mesh')
+    parser = argparse.ArgumentParser(description='Generate graded block mesh.')
     parser.add_argument('--x0', type=int, default=0, 
                         help='Starting x coordinate')
     parser.add_argument('--y0', type=int, default=0, 
@@ -302,11 +490,12 @@ def main():
     mesh = Mesh(**vars(args))
     mesh.plotMesh(field=mesh.F)
     print(mesh)
-    graph = mesh.mesh2Graph()
-    # print(graph.x.numpy())
-    # print(np.hstack((graph.edge_index.numpy().T, graph.edge_attr.numpy())))
-    # print(mesh.X)
-    # print(np.flip(mesh.Y))
+
+    line = Line(x0=0, n=8, g=1, l=np.pi)
+    line.plotLine()
+    graph = line.line2Graph(nps=2)
+    print(torch.cat([graph.edge_index.T, graph.edge_attr], dim=1))
+    print(graph.x)
 
 
 if __name__ == '__main__':

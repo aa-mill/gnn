@@ -18,7 +18,7 @@ def buildMesh():
     """
     rng = np.random.default_rng()
     with pygmsh.geo.Geometry() as geom:
-        bl = list((rng.uniform(-0.1, 0, 2)))
+        bl = list((rng.uniform(-1, 0, 2)))
         br = list((rng.uniform(0, 1), rng.uniform(-1, 0)))
         tl = list((rng.uniform(-1, 0), rng.uniform(0, 1)))
         tr = list((rng.uniform(0, 1, 2)))
@@ -48,11 +48,11 @@ def plotMesh(mesh, field, output_path=None, vmin=None, vmax=None):
     for cell in mesh.cells:
         if cell.type == "triangle":
             x, y = mesh.points[:, 0], mesh.points[:, 1]
-            print(vmin, vmax)
             contour = ax.tricontourf(x, y, cell.data, mesh.point_data[field], 
                                      100, cmap='plasma', vmin=vmin, vmax=vmax)
-            ax.triplot(x, y, cell.data, color='k', lw=0.75)
+            # ax.triplot(x, y, cell.data, color='k', lw=0.75)
             cb = fig.colorbar(contour, ax=ax)
+            cb.set_label(r'$f_x$')
     ax.spines['left'].set_visible(False)
     ax.spines['bottom'].set_visible(False)
     ax.spines['right'].set_visible(False)
@@ -62,7 +62,7 @@ def plotMesh(mesh, field, output_path=None, vmin=None, vmax=None):
     if output_path:
         fig.savefig(output_path, dpi=250)
     else:
-        fig.savefig('irregular.png', dpi=250)
+        fig.savefig('figs/irregular.png', dpi=250)
     return cb.vmin, cb.vmax
 
 
@@ -99,7 +99,7 @@ def addFields(mesh):
     mesh.point_data['Fy'] = Fy
 
 
-def mesh2Graph(mesh):
+def mesh2Graph(mesh, double=False):
     """
     Converts meshio Mesh object to a graph in PyG format.
 
@@ -142,27 +142,28 @@ def mesh2Graph(mesh):
         dy = mesh.points[src][1] - mesh.points[dest][1]
         edge_attr[idx, :] = [dx, dy]
 
+    # add mirrored edges
+    edge_index = np.concatenate((edge_index, np.flip(edge_index, axis=0)), axis=1)
+    edge_attr = np.concatenate((edge_attr, -edge_attr), axis=0)
+    
     # compute node degrees
     degrees = np.zeros(len(mesh.points), dtype=int)
     np.add.at(degrees, edge_index[1, :], 1)
     node_attr = np.concatenate((node_attr, degrees.reshape(-1, 1)), axis=1)
 
-    # add mirrored edges
-    edge_index = np.concatenate((edge_index, np.flip(edge_index, axis=0)), axis=1)
-    edge_attr = np.concatenate((edge_attr, -edge_attr), axis=0)
-
     # create PyTorch tensors
-    x = torch.tensor(node_attr, dtype=torch.float32)
+    dtype = torch.float64 if double else torch.float32
+    x = torch.tensor(node_attr, dtype=dtype)
     edge_index = torch.tensor(edge_index, dtype=torch.long)
-    edge_attr = torch.tensor(edge_attr, dtype=torch.float32)
-    y = torch.tensor(y, dtype=torch.float32)
+    edge_attr = torch.tensor(edge_attr, dtype=dtype)
+    y = torch.tensor(y, dtype=dtype)
     mask = torch.tensor(mask, dtype=torch.bool)
-    bcs = torch.tensor(bcs, dtype=torch.float32)
+    bcs = torch.tensor(bcs, dtype=dtype)
     # return graph in PyG format
     return Data(x, edge_index, edge_attr, y, mask=mask, bcs=bcs)
     
 
-def createData(num_samples, output_path=None, raw=False):
+def createData(num_samples, output_path=None, raw=False, double=False):
     """
     Creates a dataset of size num_samples, where each sample is a Data object.
 
@@ -182,7 +183,7 @@ def createData(num_samples, output_path=None, raw=False):
         if raw:
             data.append(mesh)
         else:
-            data.append(mesh2Graph(mesh))
+            data.append(mesh2Graph(mesh, double=double))
     if output_path:
         with open(output_path, 'wb') as f:
             pickle.dump(data, f)
@@ -194,8 +195,8 @@ def createData(num_samples, output_path=None, raw=False):
 if __name__ == '__main__':
     mesh = buildMesh()
     addFields(mesh)
-    for cell in mesh.cells:
-        if cell.type == 'triangle':
-            print(cell.data)
-    mesh2Graph(mesh)
+    # for cell in mesh.cells:
+    #     if cell.type == 'triangle':
+    #         print(cell.data)
+    graph = mesh2Graph(mesh)
     plotMesh(mesh, field='F')

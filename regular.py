@@ -98,9 +98,9 @@ class Line():
         if output_path:
             fig.savefig(output_path, dpi=250)
         else:
-            fig.savefig('line.png', dpi=250)
+            fig.savefig('figs/line.png', dpi=250)
         
-    def line2Graph(self, nps=1):
+    def line2Graph(self, nps=1, double=False):
         """
         Converts line to graph representation.
 
@@ -143,12 +143,13 @@ class Line():
         node_attr = np.concatenate((node_attr, degrees.reshape(-1, 1)), axis=1)
 
         # create PyTorch tensors
-        x = torch.tensor(node_attr, dtype=torch.float32)
+        dtype = torch.float64 if double else torch.float32
+        x = torch.tensor(node_attr, dtype=dtype)
         edge_index = torch.tensor(edge_index, dtype=torch.long)
-        edge_attr = torch.tensor(edge_attr, dtype=torch.float32)
-        y = torch.tensor(y, dtype=torch.float32)
+        edge_attr = torch.tensor(edge_attr, dtype=dtype)
+        y = torch.tensor(y, dtype=dtype)
         mask = torch.tensor(mask, dtype=torch.bool)
-        bcs = torch.tensor(bcs, dtype=torch.float32)
+        bcs = torch.tensor(bcs, dtype=dtype)
         # return graph in PyG format
         return Data(x, edge_index, edge_attr, y, mask=mask, bcs=bcs)
 
@@ -162,10 +163,16 @@ class Line():
         """
         # generate random functions
         x = sp.symbols('x')
-        basis = [1, x, sp.sin(x), sp.cos(x), sp.sin(x)**2, sp.sin(np.pi*(x + 1))]
-        coeffs = np.random.uniform(-1, 1, len(basis))
+        basis = [1, x, x**2, x**3,
+                 sp.sin(np.random.uniform(0, 5)*x), 
+                 sp.cos(np.random.uniform(0, 5)*x),
+                 sp.sin((x - np.random.uniform(-1, 1)**3)),
+                 sp.sin(np.random.uniform(-5, 5)*x),
+                 sp.sin(np.random.uniform(-5, 5)*x)*sp.cos(np.random.uniform(-5, 5)*x), 
+                 sp.exp(-np.random.uniform(0, 3)*x**2)]
+        coeffs = np.random.uniform(-5, 5, len(basis))
         func = sum([coeff*b for coeff, b in zip(coeffs, basis)])
-        # func = sp.sin(2*np.pi*x)
+        # func = sp.sin(x)
 
         # get analytical functions and gradients
         f = sp.lambdify(x, func, 'numpy')
@@ -306,7 +313,7 @@ class Mesh():
             fig.savefig('mesh.png', dpi=250)
         return cb.vmin, cb.vmax
 
-    def mesh2Graph(self):
+    def mesh2Graph(self, double=False):
         """
         Converts mesh to graph representation.
 
@@ -369,12 +376,13 @@ class Mesh():
         edge_attr = np.concatenate((edge_attr, -edge_attr), axis=0)
 
         # create PyTorch tensors
-        x = torch.tensor(node_attr, dtype=torch.float32)
+        dtype = torch.float64 if double else torch.float32
+        x = torch.tensor(node_attr, dtype=dtype)
         edge_index = torch.tensor(edge_index, dtype=torch.long)
-        edge_attr = torch.tensor(edge_attr, dtype=torch.float32)
-        y = torch.tensor(y, dtype=torch.float32)
+        edge_attr = torch.tensor(edge_attr, dtype=dtype)
+        y = torch.tensor(y, dtype=dtype)
         mask = torch.tensor(mask, dtype=torch.bool)
-        bcs = torch.tensor(bcs, dtype=torch.float32)
+        bcs = torch.tensor(bcs, dtype=dtype)
         # return graph in PyG format
         return Data(x, edge_index, edge_attr, y, mask=mask, bcs=bcs)
 
@@ -407,7 +415,7 @@ class Mesh():
         return F, Fx, Fy
 
 
-def createData(num_samples, dim=2, output_path=None, raw=False, nps=None):
+def createData(num_samples, dim=2, output_path=None, raw=False, nps=None, double=False):
     """
     Creates a dataset of size num_samples, where each sample is a Data object.
 
@@ -417,28 +425,22 @@ def createData(num_samples, dim=2, output_path=None, raw=False, nps=None):
 
     Returns:
         data (list): A list of Data objects, each representing a mesh.
-    """
-    if dim not in [1, 2]:
-        raise ValueError('Dimension must be 1 or 2.')
-    elif dim == 1 and nps is None:
-        raise ValueError('Number of neighbors must be specified for 1D data.')
-    elif dim == 2 and nps is not None:
-        raise ValueError('Number of neighbors is only for 1D data.')
-    
+    """    
     rng = np.random.default_rng()
     data = []
+    dtype = torch.float64 if double else torch.float32
     print('Generating data...')
     if dim == 1:
         for _ in tqdm(range(num_samples)):
-            x0 = rng.uniform(-10, 10)
-            n = rng.integers(64, 512)
+            n = int(2**rng.uniform(5, 11))
             g = 1
-            l = rng.uniform(1, 5)
+            l = 2*np.pi
+            x0 = -l/2
             line = Line(x0, n, g, l)
             if raw:
                 data.append(line)
             else:
-                data.append(line.line2Graph(nps))
+                data.append(line.line2Graph(nps, dtype))
     elif dim == 2:
         for _ in tqdm(range(num_samples)):
             x0, y0 = rng.uniform(-10, 10, size=2)
@@ -449,7 +451,7 @@ def createData(num_samples, dim=2, output_path=None, raw=False, nps=None):
             if raw:
                 data.append(mesh)
             else:
-                data.append(mesh.mesh2Graph())
+                data.append(mesh.mesh2Graph(dtype))
     if output_path:
         with open(output_path, 'wb') as f:
             pickle.dump(data, f)
@@ -486,14 +488,14 @@ def parse_args():
 
 
 def main():
-    args = parse_args()
-    mesh = Mesh(**vars(args))
-    mesh.plotMesh(field=mesh.F)
-    print(mesh)
+    # args = parse_args()
+    # mesh = Mesh(**vars(args))
+    # mesh.plotMesh(field=mesh.F)
+    # print(mesh)
 
-    line = Line(x0=0, n=8, g=1, l=np.pi)
+    line = Line(x0=-1, n=4, g=1, l=2)
     line.plotLine()
-    graph = line.line2Graph(nps=2)
+    graph = line.line2Graph(nps=2, double=True)
     print(torch.cat([graph.edge_index.T, graph.edge_attr], dim=1))
     print(graph.x)
 

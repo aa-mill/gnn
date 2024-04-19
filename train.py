@@ -1,14 +1,15 @@
+#!/usr/bin/env python3
 import torch
 from torch_geometric.loader import DataLoader
 import torch.nn as nn
 import wandb
 import pickle
-import simple
+import simple, medium, two, gnn
 import argparse
 
 
 # set device
-device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 def train(model, train, val, optimizer, criterion, device, epochs, scheduler, track=False):
@@ -41,23 +42,23 @@ def train(model, train, val, optimizer, criterion, device, epochs, scheduler, tr
             for data in val:
                 data.to(device)
                 x, _, _ = model(data.x, data.edge_index, data.edge_attr)
-                x[0][data.mask] = data.bcs
-                loss = criterion(x[0], data.y)
+                x[data.mask] = data.bcs
+                loss = criterion(x, data.y)
                 val_loss += loss.item()
         model.train()
         for data in train:
             data.to(device)
             optimizer.zero_grad()
             x, _, _ = model(data.x, data.edge_index, data.edge_attr)
-            x[0][data.mask] = data.bcs
-            loss = criterion(x[0], data.y)
+            x[data.mask] = data.bcs
+            loss = criterion(x, data.y)
             loss.backward()
             optimizer.step()
             train_loss += loss.item()
         scheduler.step()
         print(f'{epoch + 1}: '
-              f't{train_loss/len(train):.5f} '
-              f'v{val_loss/len(val):.5f}')
+              f'\tt{train_loss/len(train):.5e} '
+              f'v{val_loss/len(val):.5e}')
         if track:
             wandb.log({'epoch': epoch + 1, 
                        'train_loss': train_loss/len(train), 
@@ -78,6 +79,9 @@ def parse_args():
         argparse.Namespace: Parsed command line arguments.
     """
     parser = argparse.ArgumentParser(description='Train GNN.')
+    parser.add_argument('-m', '--model', type=str, required=True,
+                        choices=['simple', 'medium', 'two', 'gnn'],
+                        help='Model to train.')
     parser.add_argument('--epochs', type=int, default=100, 
                         help='Number of training epochs.')
     parser.add_argument('--lr', type=float, default=1e-2,
@@ -88,8 +92,8 @@ def parse_args():
                         help='Path to training data.')
     parser.add_argument('--val_path', type=str, default='data/val_data.pkl',
                         help='Path to validation data.')
-    parser.add_argument('--model', type=str, default='simple',
-                        help='Model to train.')
+    parser.add_argument('--gamma', type=float, default=0.99,
+                        help='Exponential learning rate decay.')
     return parser.parse_args()
 
 
@@ -104,13 +108,13 @@ def main():
         train_data = pickle.load(f)
     with open(args.val_path, 'rb') as f:
         val_data = pickle.load(f)
-    train_loader = DataLoader(train_data, batch_size=32, shuffle=True)
-    val_loader = DataLoader(val_data, batch_size=32, shuffle=False)
+    train_loader = DataLoader(train_data, batch_size=64, shuffle=True)
+    val_loader = DataLoader(val_data, batch_size=64, shuffle=False)
 
     # define loss and optimizer
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.95)
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=args.gamma)
 
     # train the model
     train(model, 

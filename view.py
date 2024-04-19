@@ -1,20 +1,23 @@
+#!/usr/bin/env python3
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import regular
 import irregular
 import pickle
-import simple
+import simple, medium, two, gnn
+import argparse
+from findiff import FinDiff
 
 
-device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-def testLine(model, data, index=0):
+def testLine(model, data, nps, index=0):
     line = data[index]
     model.eval()
     with torch.no_grad():
-        data = line.line2Graph(nps=2).to(device)
+        data = line.line2Graph(nps=nps, double=True).to(device)
         x, _, _ = model(data.x, data.edge_index, data.edge_attr)
         x[0][data.mask] = data.bcs
         field = x[0].detach().cpu().numpy()[:, 0]
@@ -22,6 +25,7 @@ def testLine(model, data, index=0):
         print(weights[:10, :])
     line.plotLine({'data': field, 
                    'ls': '-', 
+                   'color': '#03A9F4',
                    'label': 'GNN'}, 'figs/1d.png')
 
 
@@ -40,11 +44,11 @@ def testBlock(model, data, index=0):
     regular.plotMesh(field, 'figs/pred.png', vmin, vmax)
 
 
-def testIrregular(model, data, index=0):
+def testIrregular(model, data, double, index=0):
     mesh = data[index]
     model.eval()
     with torch.no_grad():
-        data = irregular.mesh2Graph(mesh).to(device)
+        data = irregular.mesh2Graph(mesh, double).to(device)
         x, _, _ = model(data.x, data.edge_index, data.edge_attr)
         x[data.mask] = data.bcs
         field = x.detach().cpu().numpy()[:, 0]
@@ -71,23 +75,25 @@ def weightArray(graph, weights):
     return result
 
 
-def lineConvergence(model):
+def lineConvergence(model, nps, double):
     errors = []
-    h = [2**-i for i in np.linspace(4, 12, 15)]
+    h = [2**-i for i in np.linspace(4, 11, 15)]
     for i in h:
-        line = regular.Line(x0=0, n=int(1/i), g=1, l=1)
+        line = regular.Line(x0=-np.pi, n=int(1/i), g=1, l=2*np.pi)
         model.eval()
         with torch.no_grad():
-            data = line.line2Graph(nps=2).to(device)
+            data = line.line2Graph(nps, double).to(device)
             x, _, _ = model(data.x, data.edge_index, data.edge_attr)
             x[0][data.mask] = data.bcs
             field = x[0].detach().cpu().numpy()[:, 0]
         error = np.linalg.norm(field - line.Fx, np.inf)
-        fd = np.linalg.norm(np.gradient(line.F, line.X) - line.Fx, np.inf)
+        dx = line.X[1] - line.X[0]
+        ddx = FinDiff(0, dx, acc=2)(line.F)
+        fd = np.linalg.norm(ddx - line.Fx, np.inf)
         errors.append((error, fd))
     errors = np.array(errors)
     fig, ax = plt.subplots()
-    ax.loglog(h, errors[:, 0], '.-', label='GNN')
+    ax.loglog(h, errors[:, 0], '.-', color='#03A9F4', label='GNN')
     ax.loglog(h, errors[:, 1], 'k.-', label='FD')
     ax.loglog(h, [i**2 for i in h], 'k--', label=r'$h^2$')
     ax.set_xlabel(r'$h$')
@@ -97,12 +103,31 @@ def lineConvergence(model):
     fig.savefig('figs/convergence.png', dpi=250)
 
 
+def parse_args():
+    """
+    Parses command line arguments for generating graded block mesh.
+
+    Returns:
+        argparse.Namespace: Parsed command line arguments.
+    """
+    parser = argparse.ArgumentParser(description='Visualize performance on test sample.')
+    parser.add_argument('-i', '--index', type=int, default=0,
+                        help='Index of training set sample to view.')
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
     with open('data/test_data.pkl', 'rb') as f:
         test_data = pickle.load(f)
-    model = getattr(globals()['simple'], 'model').to(device)
+    # model = getattr(globals()['simple'], 'model').to(device)
+    # model.load_state_dict(torch.load('trained_model.pt'))
+    # testLine(model, test_data, nps=2, index=args.index)
+    # lineConvergence(model, nps=2, double=True)
+
+    model = getattr(globals()['two'], 'model').to(device)
     model.load_state_dict(torch.load('trained_model.pt'))
-    testLine(model, test_data, 2)
+    testIrregular(model, test_data, double=True, index=args.index)
 
 
 if __name__ == '__main__':

@@ -1,5 +1,10 @@
 .DS_Store
 *.png
+*.mp4
 *.pkl
+*.pt
+*.h5
+*.tfrecord
+*.json
 wandb
 __pycache__

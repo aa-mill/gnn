@@ -6,5 +6,7 @@
 *.h5
 *.tfrecord
 *.json
+*.csv
+*.txt
 wandb
 __pycache__

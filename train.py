@@ -6,6 +6,7 @@ import wandb
 import pickle
 import simple, medium, two, gnn
 import argparse
+from total import EncodeProcessDecode
 
 
 # set device
@@ -56,6 +57,28 @@ def train(model, train, val, optimizer, criterion, device, epochs, scheduler, tr
             optimizer.step()
             train_loss += loss.item()
         scheduler.step()
+        # for data in train:
+        #     # move data to device
+        #     data.to(device)
+
+        #     # compute loss
+        #     x = model(data.x, data.edge_index, data.edge_attr)
+        #     x[data.mask] = model.data.bcs
+        #     y = model.output_normalizer(data.y)
+        #     loss = criterion(x, y)
+
+        #     # accumulate normalization statistics
+        #     if epoch < 5:
+        #         with torch.no_grad():
+        #             # ensure statistics are actually computed
+        #             _ = loss
+        #     else:
+        #         # normal training
+        #         optimizer.zero_grad()
+        #         loss.backward()
+        #         optimizer.step()
+        #         train_loss = loss.item()
+        #         scheduler.step()
         print(f'{epoch + 1}: '
               f'\tt{train_loss/len(train):.5e} '
               f'v{val_loss/len(val):.5e}')
@@ -102,6 +125,18 @@ def main():
 
     # create model
     model = getattr(globals()[args.model], 'model').to(device)
+
+    # model = EncodeProcessDecode(
+    #     node_size=2, 
+    #     edge_size=3, 
+    #     hidden_size=32, 
+    #     hidden_layers=2, 
+    #     latent_size=32, 
+    #     output_size=2,
+    #     graph_layers=5,
+    #     batch_size=64,
+    #     normalize=True
+    # ).to(device)
 
     # load data
     with open(args.train_path, 'rb') as f:

@@ -6,7 +6,6 @@ import torch
 from torch_geometric.data import Data
 from tqdm import tqdm
 import pickle
-from torch_scatter import scatter
 
 
 class Line():
@@ -294,11 +293,13 @@ class Mesh():
         fig, ax = plt.subplots()
         ax.plot(X, Y, 'k')
         ax.plot(X.T, Y.T, 'k')
-        ax.set_title(f'Cells: {self.nx} x {self.ny}, '
+        ax.set_title(f'Truth\n'
+                     f'Cells: {self.nx} x {self.ny}, '
                      f'Grading: {self.gx:.3f} x {self.gy:.3f}')
         if field is not None:
-            contour = ax.contourf(X, Y, field, 100, cmap='plasma', vmin=vmin, vmax=vmax)
+            contour = ax.contourf(X, Y, field, 100, cmap='magma', vmin=vmin, vmax=vmax)
             cb = fig.colorbar(contour, ax=ax)
+            cb.set_label(r'$f_x$')
         ax.set_xticks([X[0, 0], X[0, -1]])
         ax.set_yticks([Y[0, 0], Y[-1, 0]])
         ax.spines['left'].set_visible(False)
@@ -375,6 +376,11 @@ class Mesh():
         edge_index = np.concatenate((edge_index, np.flip(edge_index, axis=0)), axis=1)
         edge_attr = np.concatenate((edge_attr, -edge_attr), axis=0)
 
+        # compute node degrees
+        degrees = np.zeros(Nv, dtype=int)
+        np.add.at(degrees, edge_index[1, :], 1)
+        node_attr = np.concatenate((node_attr, degrees.reshape(-1, 1)), axis=1)
+
         # create PyTorch tensors
         dtype = torch.float64 if double else torch.float32
         x = torch.tensor(node_attr, dtype=dtype)
@@ -397,8 +403,13 @@ class Mesh():
         """
         # generate random functions
         x, y = sp.symbols('x y')
-        # basis = [1, sp.sin(x), sp.sin(y), sp.sin(x)*sp.sin(y), x, y, x*y]
-        basis = [x, y, sp.sin(x), sp.sin(y), sp.sin(x)*sp.sin(y), x*y]
+        # basis = [1, x, y, sp.sin(x), sp.sin(y), sp.sin(x)*sp.sin(y), x*y]
+        basis = [1, x, y, x**2, y**2, x**3, y**3,
+                sp.sin(np.random.uniform(0, 10)*x + np.random.uniform(0, 10)*y + np.random.uniform(-1, 1)), 
+                sp.sin(np.random.uniform(0, 10)*x)*x*y,
+                x*sp.exp(-x**2 - y**2)*sp.sin(np.random.uniform(0, 10)*(sp.atan(y/x) + sp.sqrt(x**2 + y**2))),
+                sp.sin(np.random.uniform(-10, 10)*x)*sp.cos(np.random.uniform(-10, 10)*y), 
+                sp.exp(-np.random.uniform(0, 3)*x**2)]
         coeffs = np.random.uniform(-1, 1, len(basis))
         func = sum([coeff*b for coeff, b in zip(coeffs, basis)])
 
@@ -428,7 +439,6 @@ def createData(num_samples, dim=2, output_path=None, raw=False, nps=None, double
     """    
     rng = np.random.default_rng()
     data = []
-    dtype = torch.float64 if double else torch.float32
     print('Generating data...')
     if dim == 1:
         for _ in tqdm(range(num_samples)):
@@ -440,18 +450,18 @@ def createData(num_samples, dim=2, output_path=None, raw=False, nps=None, double
             if raw:
                 data.append(line)
             else:
-                data.append(line.line2Graph(nps, dtype))
+                data.append(line.line2Graph(nps, double))
     elif dim == 2:
         for _ in tqdm(range(num_samples)):
-            x0, y0 = rng.uniform(-10, 10, size=2)
-            nx, ny = rng.integers(50, 100, size=2)
+            x0, y0 = rng.uniform(-1, 1, size=2)
+            nx, ny = rng.integers(2**5, 2**6, size=2)
             gx, gy = rng.uniform(.2, 5, size=2)
             lx, ly = rng.uniform(1, 5, size=2)
             mesh = Mesh(x0, y0, nx, ny, gx, gy, lx, ly)
             if raw:
                 data.append(mesh)
             else:
-                data.append(mesh.mesh2Graph(dtype))
+                data.append(mesh.mesh2Graph(double))
     if output_path:
         with open(output_path, 'wb') as f:
             pickle.dump(data, f)

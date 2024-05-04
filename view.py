@@ -8,6 +8,7 @@ import pickle
 import simple, medium, two, gnn
 import argparse
 from findiff import FinDiff
+from total import EncodeProcessDecode
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -29,19 +30,19 @@ def testLine(model, data, nps, index=0):
                    'label': 'GNN'}, 'figs/1d.png')
 
 
-def testBlock(model, data, index=0):
+def testBlock(model, data, double, index=0):
     mesh = data[index]
     model.eval()
     with torch.no_grad():
-        data = mesh.mesh2Graph().to(device)
+        data = mesh.mesh2Graph(double).to(device)
         x, _, _ = model(data.x, data.edge_index, data.edge_attr)
         x[data.mask] = data.bcs
         field = x.detach().cpu().numpy()[:, 0]
         field = field.reshape(mesh.F.shape)
     vmin = min(mesh.Fx.min(), field.min())
     vmax = max(mesh.Fx.max(), field.max())
-    regular.plotMesh(mesh.Fx, 'figs/truth.png', vmin, vmax)
-    regular.plotMesh(field, 'figs/pred.png', vmin, vmax)
+    mesh.plotMesh(mesh.Fx, 'figs/truth.png', vmin, vmax)
+    mesh.plotMesh(field, 'figs/pred.png', vmin, vmax)
 
 
 def testIrregular(model, data, double, index=0):
@@ -125,9 +126,21 @@ def main():
     # testLine(model, test_data, nps=2, index=args.index)
     # lineConvergence(model, nps=2, double=True)
 
-    model = getattr(globals()['two'], 'model').to(device)
+    model = getattr(globals()['medium'], 'model').to(device)
+    # model = EncodeProcessDecode(
+    #     node_size=2, 
+    #     edge_size=3, 
+    #     hidden_size=32, 
+    #     hidden_layers=2, 
+    #     latent_size=32, 
+    #     output_size=2,
+    #     graph_layers=5,
+    #     batch_size=64,
+    #     normalize=False
+    # ).to(device)
     model.load_state_dict(torch.load('trained_model.pt'))
     testIrregular(model, test_data, double=True, index=args.index)
+    # testBlock(model, test_data, double=True, index=args.index)
 
 
 if __name__ == '__main__':

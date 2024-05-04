@@ -91,7 +91,7 @@ def parse_args():
     parser.add_argument('--dir', type=str, default='data/',
                         help='Directory to save datasets.')
     parser.add_argument('--double', action='store_true',
-                        help='If true, uses double precision.')
+                        help='If present, uses double precision.')
     return parser.parse_args()
 
 def main():

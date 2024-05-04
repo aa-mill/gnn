@@ -44,19 +44,21 @@ def plotMesh(mesh, field, output_path=None, vmin=None, vmax=None):
         vmin (float): Minimum value of the colorbar.
         vmax (float): Maximum value of the colorbar.
     """
+    plt.rcParams.update({'font.size': 12})
     fig, ax = plt.subplots()
     for cell in mesh.cells:
         if cell.type == "triangle":
             x, y = mesh.points[:, 0], mesh.points[:, 1]
             contour = ax.tricontourf(x, y, cell.data, mesh.point_data[field], 
-                                     100, cmap='plasma', vmin=vmin, vmax=vmax)
-            # ax.triplot(x, y, cell.data, color='k', lw=0.75)
+                                     100, cmap='magma', vmin=vmin, vmax=vmax)
+            # ax.triplot(x, y, cell.data, color='k', lw=0.5)
             cb = fig.colorbar(contour, ax=ax)
             cb.set_label(r'$f_x$')
     ax.spines['left'].set_visible(False)
     ax.spines['bottom'].set_visible(False)
     ax.spines['right'].set_visible(False)
     ax.spines['top'].set_visible(False)
+    ax.set_title('Prediction')
     ax.set_aspect('equal')
     fig.tight_layout()
     if output_path:
@@ -77,8 +79,13 @@ def addFields(mesh):
     """
     # generate random functions
     x, y = sp.symbols('x y')
-    # basis = [1, sp.sin(x), sp.sin(y), sp.sin(x)*sp.sin(y), x, y, x*y]
-    basis = [x, y, sp.sin(x), sp.sin(y), sp.sin(x)*sp.sin(y), x*y]
+    # basis = [x, y, sp.sin(x), sp.sin(y), sp.sin(x)*sp.sin(y), x*y]
+    basis = [1, x, y, x**2, y**2, x**3, y**3,
+            sp.sin(np.random.uniform(0, 10)*x + np.random.uniform(0, 10)*y + np.random.uniform(-1, 1)), 
+            sp.sin(np.random.uniform(0, 10)*x)*x*y,
+            x*sp.exp(-x**2 - y**2)*sp.sin(np.random.uniform(0, 10)*(sp.atan(y/x) + sp.sqrt(x**2 + y**2))),
+            sp.sin(np.random.uniform(-10, 10)*x)*sp.cos(np.random.uniform(-10, 10)*y), 
+            sp.exp(-np.random.uniform(0, 3)*x**2)]
     coeffs = np.random.uniform(-1, 1, len(basis))
     func = sum([coeff*b for coeff, b in zip(coeffs, basis)])
 

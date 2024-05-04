@@ -12,14 +12,14 @@ class EdgeUpdate(nn.Module):
             nn.ReLU(),
             nn.Linear(32, 32),
             nn.ReLU(),
-            nn.Linear(32, 2))
+            nn.Linear(32, 2)).double()
         
         self.mlp = nn.Sequential(
             nn.Linear(7, 32),
             nn.ReLU(),
             nn.Linear(32, 32),
             nn.ReLU(),
-            nn.Linear(32, 1))
+            nn.Linear(32, 5)).double()
 
     def forward(self, src, dest, edge_attr, u, batch):
         # unpacking features
@@ -42,11 +42,11 @@ class NodeUpdate(nn.Module):
     def __init__(self):
         super(NodeUpdate, self).__init__()
         self.mlp = nn.Sequential(
-            nn.Linear(5, 32),
+            nn.Linear(17, 32),
             nn.ReLU(),
             nn.Linear(32, 32),
             nn.ReLU(),
-            nn.Linear(32, 2))
+            nn.Linear(32, 2)).double()
 
     def forward(self, x, edge_index, edge_attr, u, batch):
         # unpack features
